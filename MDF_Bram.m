@@ -7,31 +7,32 @@
 
 % c's
 clear all;
-close all;
+% close all;
 clc
 
 % plot progression?
 plotting = true;
 
-% initialize particles
+% particle properties
 N = 150;
 Eps = 100;
 mass = 1;
 Sigma = 1;
 
-% initialize wall
+% wall properties
 L = 10;
-Eps_wall = 200;
+Eps_wall = 500;
 Sigma_wall = 1;
 
 % initialize time
 N_steps = 1E4;
-dt = 5e-4;
-mvm_size = [10,0];
+dt = 1e-3; %1e-3; 
+mvm_size = [100,0];
 
 % initialize energies, temp, pressure
 E_pot = zeros(N_steps,1)';
 E_kin = zeros(N_steps,1)';
+Momentum_tot = zeros(N_steps,1)';
 T = zeros(N_steps,1)';
 P = zeros(N_steps,1)';
 P_law = zeros(N_steps,1)';
@@ -41,7 +42,7 @@ x = (L-2*Sigma_wall) * (rand(N, 2) - 0.5);
 x_old = x;
 v = zeros(size(x));
 v_abs_sqr = zeros([length(x),N_steps]); %v;
-v_max = 100; % for Maxwell-Boltzmann
+v_max = 40; % for Maxwell-Boltzmann
 v_arr = 1:1:v_max;
 
 % init
@@ -101,8 +102,9 @@ for step = 1:N_steps
     phi_ij = Eps .* ( Sigma - r_ij_abs).^2 .*(r_ij_abs <= Sigma) .* ~eye(N);
     phi_wall = Eps_wall .* ( Sigma_wall - r_ij_wall_abs).^2 .*(r_ij_wall_abs <= Sigma_wall);
     E_pot(step) = 0.5 * squeeze(sum(sum(phi_ij))) + squeeze(sum(sum(phi_wall)));
-    v_abs_sqr(:,step) = v(:,1).^2 + v(:,2).^2;
-    E_kin(step) = sum(0.5 .* mass .* v_abs_sqr(:,step));
+    v_abs_sqr(:,step) = sqrt(v(:,1).^2 + v(:,2).^2);
+    E_kin(step) = sum(0.5 .* mass .* v_abs_sqr(:,step).^2);
+    Momentum_tot(step) = sum(v_abs_sqr(:,step) * mass);
     
     % temperature
     T(step) = E_kin(step) / (N * kB);
@@ -125,13 +127,14 @@ for step = 1:N_steps
     [x,v] = verlet(x,x_old,f_i,dt,mass);
     x_old = tmp;
     
+    % calculate averages
     avg_T = movmean(T,mvm_size);
     avg_P = movmean(P,mvm_size);
     avg_P_law = movmean(P_law,mvm_size);
     avg_v_abs_sqr = movmean(v_abs_sqr,mvm_size,2);
     
     % Maxwell-Boltzmann curve
-    MWBM_curve = N .* v_arr .* exp(-v_arr.^2 .* mass./(2*kB.*avg_T(step))) ...
+    MWBM_curve = 2 * N .* v_arr .* exp(-v_arr.^2 .* mass./(2*kB.*avg_T(step))) ...
             .* mass ./ (kB .* T(step));
 
     if plotting && rem(step,round(N_steps/100)) == 0 % && step > N_steps/2
@@ -147,6 +150,8 @@ for step = 1:N_steps
         set(h2_2,'YData',E_pot);
         set(h2_3,'YData',E_pot+E_kin);
         
+        set(h6_1,'YData',Momentum_tot);
+        
         set(h3_1,'YData',avg_T);
         set(h4_1,'YData',avg_P);
         set(h4_2,'YData',avg_P_law);
@@ -160,16 +165,22 @@ for step = 1:N_steps
     end
 end
 
+
+
 if ~plotting
     delete(f)
     plot_energy(E_kin,E_pot)
 end
+%%
+g = radial_dist(r_ij_abs,1,L,N);
 
-g = radial_dist(r_ij_abs,1,L);
-
-curdate = datestr(datetime,'yyyy_mm_dd_HH_MM_SS');
-savefig(h,['results//',curdate,'.fig'])
-save([curdate,'.mat'],'g','E_kin','E_pot','avg_T','avg_P','avg_P_law','avg_v_abs_sqr','MWBM_curve'
+% curdate = datestr(datetime,'yyyy_mm_dd_HH_MM_SS');
+% savefig(h,['results//',curdate,'.fig']);
+% save(['results//',curdate,'.mat'],'g','E_kin','E_pot','avg_T','avg_P','avg_P_law','avg_v_abs_sqr','MWBM_curve');
+% 
+% scaling=4; 
+% set(gcf, 'Color', 'none');
+% export_fig (['results//',curdate,'.png'],['-m ',num2str(scaling)])
 
 
 
@@ -183,13 +194,14 @@ function [x_out,v_out] = verlet(x_in,x_in_old,f_i,dt,mass)
     v_out = (x_out - x_in) ./ dt;
 end
 
-function g = radial_dist(r_ij_abs,dr,L)
+function g = radial_dist(r_ij_abs,dr,L,N)
     r_max = sqrt(2)*L;
     rr = 0:dr:r_max;
     g = zeros(size(rr));
     for idx = 1:length(rr)
         r = rr(idx);
-        g(idx) = sum(sum(r_ij_abs(r_ij_abs >= r & r_ij_abs < r+dr)));
+        expected = 2*pi*N*r*dr/L^2;
+        g(idx) = sum(sum(r_ij_abs(r_ij_abs >= r & r_ij_abs < r+dr)))/expected;
     end
     
     figure; 
